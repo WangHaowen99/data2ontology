@@ -114,6 +114,9 @@ class ObjectType(BaseModel):
     primary_key: list[str] = Field(default_factory=list, description="Primary key property IDs")
     properties: list[PropertyType] = Field(default_factory=list, description="Properties of this object")
     creation_reason: str = Field(..., description="Why this object type was created")
+    # Unstructured data insights
+    insights_from_code: Optional[str] = Field(None, description="Insights from code analysis")
+    insights_from_logs: Optional[str] = Field(None, description="Insights from log analysis")
 
     def get_property(self, name: str) -> Optional[PropertyType]:
         """Get property by name."""
@@ -134,6 +137,9 @@ class LinkType(BaseModel):
     source_property: Optional[str] = Field(None, description="Source property for the link")
     confidence: str = Field("high", description="Confidence level of this link")
     creation_reason: str = Field(..., description="Why this link was created")
+    # Unstructured data insights
+    insights_from_code: Optional[str] = Field(None, description="Insights from code analysis")
+    insights_from_logs: Optional[str] = Field(None, description="Insights from log analysis")
 
 
 class Ontology(BaseModel):

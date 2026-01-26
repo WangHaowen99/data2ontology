@@ -6,7 +6,15 @@ import uuid
 import re
 
 from .config import AnalysisConfig
-from .models.metadata import DatabaseMetadata, TableInfo, DetectedRelationship, RelationshipConfidence
+from .models.metadata import (
+    DatabaseMetadata, 
+    EnhancedDatabaseMetadata,
+    TableInfo, 
+    DetectedRelationship, 
+    RelationshipConfidence,
+    EntityInsight,
+    InsightSource,
+)
 from .models.ontology import (
     PropertyType,
     ObjectType,
@@ -24,11 +32,19 @@ class OntologyGenerator:
         """Initialize the ontology generator.
         
         Args:
-            metadata: Database metadata with detected relationships
+            metadata: Database metadata with detected relationships (can be EnhancedDatabaseMetadata)
             config: Analysis configuration
         """
         self.metadata = metadata
         self.config = config or AnalysisConfig()
+        
+        # Check if we have enhanced metadata with unstructured insights
+        self.is_enhanced = isinstance(metadata, EnhancedDatabaseMetadata)
+        if self.is_enhanced:
+            self.entity_insights_map = {
+                self._normalize_name(ei.table_name or ei.entity_name): ei 
+                for ei in metadata.entity_insights
+            }
 
     def generate(self) -> Ontology:
         """Generate complete Ontology from metadata.
@@ -81,6 +97,20 @@ class OntologyGenerator:
         # Determine creation reason
         reason = self._generate_object_type_reason(table)
         
+        # Check for insights from unstructured data
+        insights_from_code = None
+        insights_from_logs = None
+        if self.is_enhanced:
+            entity_insight = self.entity_insights_map.get(self._normalize_name(table.name))
+            if entity_insight:
+                if InsightSource.CODE in entity_insight.sources:
+                    insights_from_code = entity_insight.description_from_code or \
+                        f"代码中发现此实体，相关实体: {', '.join(entity_insight.related_entities[:3])}"
+                if InsightSource.LOG in entity_insight.sources:
+                    ops = entity_insight.operations_from_logs
+                    if ops:
+                        insights_from_logs = f"日志中检测到操作: {', '.join(ops)}"
+        
         return ObjectType(
             id=obj_id,
             name=obj_name,
@@ -89,6 +119,8 @@ class OntologyGenerator:
             primary_key=[self._to_camel_case(pk) for pk in table.primary_keys],
             properties=properties,
             creation_reason=reason,
+            insights_from_code=insights_from_code,
+            insights_from_logs=insights_from_logs,
         )
 
     def _generate_property(self, table_name: str, column) -> PropertyType:
@@ -144,6 +176,29 @@ class OntologyGenerator:
         # Determine cardinality (usually many-to-one for FK relationships)
         cardinality = "many-to-one"
         
+        # Check for insights from unstructured data
+        insights_from_code = None
+        insights_from_logs = None
+        if self.is_enhanced:
+            # Look for matching relationship insights
+            source_norm = self._normalize_name(rel.source_table)
+            target_norm = self._normalize_name(rel.target_table)
+            
+            for rel_insight in self.metadata.relationship_insights:
+                if (self._normalize_name(rel_insight.source_entity) == source_norm and 
+                    self._normalize_name(rel_insight.target_entity) == target_norm):
+                    
+                    if InsightSource.CODE in rel_insight.sources:
+                        code_evidence = [e for e in rel_insight.evidence if "代码" in e or "code" in e.lower()]
+                        if code_evidence:
+                            insights_from_code = "; ".join(code_evidence[:2])
+                    
+                    if InsightSource.LOG in rel_insight.sources:
+                        log_evidence = [e for e in rel_insight.evidence if "日志" in e or "log" in e.lower()]
+                        if log_evidence:
+                            insights_from_logs = "; ".join(log_evidence[:2])
+                    break
+        
         return LinkType(
             id=link_id,
             name=link_name,
@@ -154,6 +209,8 @@ class OntologyGenerator:
             source_property=self._to_camel_case(rel.source_column),
             confidence=rel.confidence.value,
             creation_reason=rel.reason,
+            insights_from_code=insights_from_code,
+            insights_from_logs=insights_from_logs,
         )
 
     def _generate_link_name(self, rel: DetectedRelationship) -> str:
@@ -249,6 +306,17 @@ class OntologyGenerator:
         # Split by underscore and capitalize each word
         parts = name.replace('_', ' ').split()
         return ' '.join(word.capitalize() for word in parts)
+
+    def _normalize_name(self, name: str) -> str:
+        """Normalize entity name for matching with insights.
+        
+        Args:
+            name: Entity name
+            
+        Returns:
+            Normalized name
+        """
+        return name.lower().strip().rstrip('s')
 
     def get_ontology_summary(self, ontology: Ontology) -> dict:
         """Get a summary of the ontology.

@@ -1,0 +1,6 @@
+# 忽略所有的 __pycache__ 目录（无论它在哪个层级）
+__pycache__/
+*.pyc
+
+# 忽略 output 目录
+output/

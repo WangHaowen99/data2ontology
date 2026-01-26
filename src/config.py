@@ -124,6 +124,33 @@ class Neo4jConfig(BaseSettings):
         extra = "ignore"
 
 
+class UnstructuredConfig(BaseSettings):
+    """Configuration for unstructured data analysis."""
+    
+    # Log analysis
+    enable_log_analysis: bool = Field(default=False, description="Enable log analysis")
+    log_paths: list[str] = Field(default_factory=list, description="Paths to log files or directories")
+    log_format: str = Field(default="auto", description="Log format: auto, text, json")
+    log_max_lines: int = Field(default=10000, description="Maximum lines to process per log file")
+    
+    # Code analysis
+    enable_code_analysis: bool = Field(default=False, description="Enable code analysis")
+    code_paths: list[str] = Field(default_factory=list, description="Paths to code directories or files")
+    code_languages: list[str] = Field(
+        default_factory=lambda: ["python", "java", "javascript", "typescript"],
+        description="Programming languages to analyze"
+    )
+    code_exclude_patterns: list[str] = Field(
+        default_factory=lambda: ["*/node_modules/*", "*/venv/*", "*/.git/*", "*/build/*", "*/dist/*"],
+        description="Patterns to exclude from code analysis"
+    )
+    
+    class Config:
+        env_prefix = "UNSTRUCTURED_"
+        extra = "ignore"
+
+
+
 class AppConfig(BaseSettings):
     """Main application configuration."""
     
@@ -131,6 +158,7 @@ class AppConfig(BaseSettings):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    unstructured: UnstructuredConfig = Field(default_factory=UnstructuredConfig)
     
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")
@@ -152,6 +180,7 @@ class AppConfig(BaseSettings):
             analysis=AnalysisConfig(),
             neo4j=Neo4jConfig(),
             output=OutputConfig(),
+            unstructured=UnstructuredConfig(),
         )
 
     @classmethod
@@ -167,6 +196,10 @@ class AppConfig(BaseSettings):
         neo4j_uri: Optional[str] = None,
         neo4j_user: Optional[str] = None,
         neo4j_password: Optional[str] = None,
+        enable_log_analysis: bool = False,
+        log_paths: Optional[list[str]] = None,
+        enable_code_analysis: bool = False,
+        code_paths: Optional[list[str]] = None,
         **kwargs
     ) -> "AppConfig":
         """Create configuration from command line arguments."""
@@ -184,9 +217,19 @@ class AppConfig(BaseSettings):
         if neo4j_user is not None: neo4j_kwargs["user"] = neo4j_user
         if neo4j_password is not None: neo4j_kwargs["password"] = neo4j_password
         
+        unstructured_kwargs = {
+            "enable_log_analysis": enable_log_analysis,
+            "enable_code_analysis": enable_code_analysis,
+        }
+        if log_paths is not None:
+            unstructured_kwargs["log_paths"] = log_paths
+        if code_paths is not None:
+            unstructured_kwargs["code_paths"] = code_paths
+        
         return cls(
             database=DatabaseConfig(**db_kwargs),
             analysis=AnalysisConfig(**kwargs),
             neo4j=Neo4jConfig(**neo4j_kwargs),
             output=OutputConfig(output_dir=Path(output_dir)),
+            unstructured=UnstructuredConfig(**unstructured_kwargs),
         )

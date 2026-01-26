@@ -8,6 +8,9 @@
 - 🔗 **关系发现**: 智能检测表间关系（外键约束、命名规则、相似度分析）
 - 🔧 **管道生成**: 自动生成最优 JOIN 路径和数据转换管道
 - 🏷️ **Ontology 生成**: 创建实体类型、属性类型、关系类型的 Ontology 原型
+- 📝 **日志分析** (可选): 从应用日志中提取业务实体引用和操作模式
+- 💻 **代码分析** (可选): 从源代码中提取数据模型定义和 API 端点
+- 🔄 **多源整合**: 将数据库元数据、日志和代码分析结果整合，生成更完善的 Ontology
 - 🕸️ **Neo4j 集成**: 即时将 Ontology 结构导出到 Neo4j 图数据库
 - 📊 **分析报告**: 输出详细的元数据分析和 Ontology 创建报告
 
@@ -74,7 +77,53 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=secret
 ```
 
-### 5. 查看输出
+### 3. 使用非结构化数据分析 (可选)
+
+#### 启用日志分析
+
+从应用日志中提取业务实体引用和操作模式：
+
+```bash
+python main.py -d your_database -u your_user -P your_password \
+    --enable-log-analysis \
+    --log-paths ./logs/app.log \
+    --log-paths ./logs/api.log
+```
+
+日志分析器会检测:
+- 实体引用（user, order, product 等）
+- CRUD 操作模式
+- 实体间的共现关系
+
+#### 启用代码分析
+
+从项目源代码中提取数据模型和 API 端点：
+
+```bash
+python main.py -d your_database -u your_user -P your_password \
+    --enable-code-analysis \
+    --code-paths ./src/models \
+    --code-paths ./src/api
+```
+
+代码分析器支持:
+- Python (类定义、ORM 模型、FastAPI/Flask 路由)
+- Java (实体类、Spring 注解)
+- JavaScript/TypeScript (类、接口、Express 路由)
+
+#### 同时使用多个数据源
+
+结合数据库元数据、日志和代码分析：
+
+```bash
+python main.py -d your_database -u your_user -P your_password \
+    --enable-log-analysis --log-paths ./logs/*.log \
+    --enable-code-analysis --code-paths ./src \
+    --output ./output \
+    --verbose
+```
+
+### 4. 查看输出
 
 运行完成后，在 `output/` 目录下会生成：
 
@@ -96,6 +145,11 @@ NEO4J_PASSWORD=secret
 | `--schema` | `-s` | public | 要分析的 Schema |
 | `--output` | `-o` | ./output | 输出目录 |
 | `--env-file` | `-e` | .env | 环境变量文件路径 |
+| `--enable-log-analysis` | | false | 启用日志分析 |
+| `--log-paths` | | | 日志文件路径（可多次指定） |
+| `--enable-code-analysis` | | false | 启用代码分析 |
+| `--code-paths` | | | 代码目录路径（可多次指定） |
+| `--export-neo4j` | | false | 导出到 Neo4j |
 | `--verbose` | `-v` | false | 详细输出 |
 
 ## 编程接口
