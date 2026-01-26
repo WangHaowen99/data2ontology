@@ -1,6 +1,4 @@
-# Auto Pipeline Builder
-
-一个类似 Palantir Pipeline Builder 的自动化数据管道构建工具，用于从 PostgreSQL 数据库元数据自动生成数据管道和 Ontology 原型。
+一个自动化数据管道构建工具，用于将结构化数据和非结构化数据自动生成数据管道和 Ontology 原型。
 
 ## 功能特性
 
@@ -14,7 +12,7 @@
 ## 安装
 
 ```bash
-cd auto_pipeline_builder
+cd data2ontology
 pip install -r requirements.txt
 ```
 
