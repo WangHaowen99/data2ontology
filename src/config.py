@@ -15,7 +15,7 @@ class DatabaseConfig(BaseSettings):
     database: str = Field(..., description="Database name")
     user: str = Field(..., description="Database user")
     password: str = Field(..., description="Database password")
-    schema: str = Field(default="public", description="Default schema to analyze")
+    db_schema: str = Field(default="public", description="Default schema to analyze")
     
     class Config:
         env_prefix = "PG_"

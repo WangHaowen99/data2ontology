@@ -44,7 +44,7 @@ class IndexInfo(BaseModel):
 class TableInfo(BaseModel):
     """Complete information about a database table."""
     name: str = Field(..., description="Table name")
-    schema: str = Field("public", description="Schema name")
+    schema_name: str = Field("public", description="Schema name")
     columns: list[ColumnInfo] = Field(default_factory=list, description="Table columns")
     primary_keys: list[str] = Field(default_factory=list, description="Primary key columns")
     foreign_keys: list[ForeignKeyInfo] = Field(default_factory=list, description="Foreign keys")
@@ -55,7 +55,7 @@ class TableInfo(BaseModel):
     @property
     def full_name(self) -> str:
         """Get fully qualified table name."""
-        return f"{self.schema}.{self.name}"
+        return f"{self.schema_name}.{self.name}"
 
     def get_column(self, name: str) -> Optional[ColumnInfo]:
         """Get column by name."""
@@ -88,7 +88,7 @@ class DatabaseMetadata(BaseModel):
     def get_table(self, name: str, schema: str = "public") -> Optional[TableInfo]:
         """Get table by name and schema."""
         for table in self.tables:
-            if table.name == name and table.schema == schema:
+            if table.name == name and table.schema_name == schema:
                 return table
         return None
 

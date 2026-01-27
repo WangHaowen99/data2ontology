@@ -1,5 +1,7 @@
 # Database
 psycopg2-binary>=2.9.9
+pymysql>=1.1.0
+pyodbc>=5.0.0
 SQLAlchemy>=2.0.0
 neo4j>=5.0.0
 
@@ -23,3 +25,15 @@ pytest-asyncio>=0.21.0
 # CLI
 click>=8.1.0
 rich>=13.0.0
+
+# API Server
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+
+# Data Processing
+pandas>=2.0.0
+pandasql>=0.7.3
+
+# Security
+cryptography>=41.0.0
