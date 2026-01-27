@@ -12,10 +12,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Add current directory to path to import src
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +44,7 @@ app.add_middleware(
 # Global state for active connections and adapters
 _active_adapters: Dict[str, DatabaseAdapter] = {}
 _ontologies: Dict[str, Any] = {}
+_tasks: Dict[str, Dict[str, Any]] = {}  # 存储后台任务状态
 _neo4j_driver = None
 
 # --- Data Models ---
@@ -79,7 +80,15 @@ class Neo4jExportRequest(BaseModel):
 
 class NodeCreateRequest(BaseModel):
     label: str
-    properties: Dict[str, Any]
+    properties: Dict[str, Any] = {}
+
+class TaskResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str = ""
+    progress: float = 0.0
+    logs: List[Dict[str, str]] = []  # {time: str, content: str, status: str}
+    result: Optional[Dict[str, Any]] = None
 
 class NodeUpdateRequest(BaseModel):
     properties: Dict[str, Any]
@@ -350,17 +359,42 @@ async def update_prompts_config(config: Dict[str, str] = Body(...)):
 
 # --- Ontology APIs ---
 
-@app.post("/api/ontology/generate")
-async def generate_ontology(req: OntologyGenerateRequest):
-    """生成本体."""
-    adapter = get_active_adapter(req.connection_id)
+
+# --- Task Progress Helper ---
+
+def update_task(task_id: str, status: Optional[str] = None, message: Optional[str] = None, progress: Optional[float] = None, log_content: Optional[str] = None):
+    """Update task status and logs."""
+    if task_id not in _tasks:
+        return
+        
+    task = _tasks[task_id]
+    if status:
+        task["status"] = status
+    if message:
+        task["message"] = message
+    if progress is not None:
+        task["progress"] = progress
     
+    if log_content:
+        log_entry = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "content": log_content,
+            "status": "process" if status == "running" else status or "process"
+        }
+        task["logs"].append(log_entry)
+
+async def process_ontology_generation(task_id: str, req: OntologyGenerateRequest):
+    """Background task for ontology generation."""
     try:
-        # Get metadata from adapter
+        update_task(task_id, "running", "开始获取元数据...", 0.05, "开始从数据库获取元数据...")
+        
+        adapter = get_active_adapter(req.connection_id)
         connection_id = req.connection_id or list(_active_adapters.keys())[0]
+        
+        # Get metadata
         metadata = adapter_to_metadata(adapter, connection_id)
         
-        # 过滤只使用用户选择的表
+        # Filter tables
         if req.table_names:
             selected_tables_set = set(req.table_names)
             metadata.tables = [
@@ -368,12 +402,15 @@ async def generate_ontology(req: OntologyGenerateRequest):
                 if t.name in selected_tables_set or t.full_name in selected_tables_set
             ]
         
-        # Run relationship analysis
+        update_task(task_id, "running", f"已获取 {len(metadata.tables)} 个表的元数据", 0.1, f"获取到 {len(metadata.tables)} 个表的元数据，开始分析...")
+
+        # Relationship analysis
+        update_task(task_id, "running", "正在分析表关系...", 0.15, "正在分析表之间的外键和潜在关联...")
         analysis_config = AnalysisConfig(schemas=[adapter.config.get("schema_name", "public")])
         analyzer = RelationshipAnalyzer(analysis_config)
         metadata = analyzer.analyze(metadata)
         
-        # 语义分析：为每个表采样数据并分析
+        # Semantic analysis prep
         prompts_config = load_prompts_config()
         llm_config = LLMConfig(
             api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -386,15 +423,22 @@ async def generate_ontology(req: OntologyGenerateRequest):
         )
         semantic_analyzer = SemanticAnalyzer(llm_config)
         
+        update_task(task_id, "running", "开始语义分析...", 0.2, "开始使用 LLM 进行语义分析...")
+        
         table_analyses = {}
-        for table in metadata.tables:
-            # 获取样本数据
+        total_tables = len(metadata.tables)
+        
+        for idx, table in enumerate(metadata.tables):
+            progress = 0.2 + (0.6 * (idx / total_tables))
+            update_task(task_id, "running", f"正在分析表: {table.name}", progress, f"正在分析表 '{table.name}' ({idx+1}/{total_tables})...")
+            
+            # Fetch sample data
             try:
                 sample_data = adapter.get_table_sample(table.name, limit=5)
             except:
                 sample_data = []
             
-            # 构建列信息
+            # Build column info
             columns_info = [
                 {
                     "name": col.name,
@@ -405,7 +449,7 @@ async def generate_ontology(req: OntologyGenerateRequest):
                 for col in table.columns
             ]
             
-            # 分析表
+            # Analyze table
             analysis = semantic_analyzer.analyze_table(
                 table_name=table.name,
                 columns=columns_info,
@@ -416,7 +460,12 @@ async def generate_ontology(req: OntologyGenerateRequest):
             
             if analysis:
                 table_analyses[table.name] = analysis
-        
+                # Log detailed analysis result
+                props_desc = ", ".join([f"{p['column_name']}->{p['business_name']}" for p in analysis.get('properties', [])[:3]])
+                update_task(task_id, None, None, None, f"✓ 表 '{table.name}' 分析完成: 识别为 '{analysis.get('entity_name_cn')}'")
+
+        update_task(task_id, "running", "计算图谱结构...", 0.85, "语义分析完成，正在生成本体结构...")
+
         # Generate ontology
         ont_generator = OntologyGenerator(metadata, analysis_config)
         ontology = ont_generator.generate()
@@ -425,20 +474,53 @@ async def generate_ontology(req: OntologyGenerateRequest):
         ontology_id = f"ont_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         _ontologies[ontology_id] = ontology
         
-        # 生成语义报告
+        update_task(task_id, "running", "生成报告...", 0.95, "正在生成分析报告...")
+
+        # Generate report
         report_content = generate_semantic_report(ontology, table_analyses)
         
-        return {
+        result = {
             "ontology_id": ontology_id,
             "ontology": ontology.dict(),
             "report": report_content,
-            "table_analyses": table_analyses  # 返回分析结果供前端使用
+            "table_analyses": table_analyses
         }
         
+        update_task(task_id, "completed", "构建完成", 1.0, "本体构建全部完成！")
+        _tasks[task_id]["result"] = result
+
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        update_task(task_id, "error", f"构建失败: {error_msg}", None, f"错误: {error_msg}")
+
+@app.post("/api/ontology/generate", response_model=TaskResponse)
+async def generate_ontology(req: OntologyGenerateRequest, background_tasks: BackgroundTasks):
+    """异步生成本体."""
+    task_id = f"task_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    
+    # Initialize task
+    _tasks[task_id] = {
+        "task_id": task_id,
+        "status": "pending",
+        "message": "任务已创建",
+        "progress": 0.0,
+        "logs": [],
+        "result": None
+    }
+    
+    # Start background task
+    background_tasks.add_task(process_ontology_generation, task_id, req)
+    
+    return _tasks[task_id]
+
+@app.get("/api/ontology/task/{task_id}", response_model=TaskResponse)
+async def get_task_status(task_id: str):
+    """获取任务状态."""
+    if task_id not in _tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return _tasks[task_id]
 
 @app.get("/api/ontology/list")
 async def list_ontologies():

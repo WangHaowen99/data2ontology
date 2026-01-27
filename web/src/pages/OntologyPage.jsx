@@ -52,6 +52,7 @@ const OntologyPage = () => {
     const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, nodeType: null });
 
     const [configCollapsed, setConfigCollapsed] = useState(false);
+    const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
     const [viewMode, setViewMode] = useState('schema');
 
     const [promptsModalVisible, setPromptsModalVisible] = useState(false);
@@ -248,57 +249,82 @@ const OntologyPage = () => {
         setViewMode('schema');
         setCurrentStep(0);
         setStepLogs([]);
-        setConfigCollapsed(true);
+        setConfigCollapsed(false);
         setSelectedNode(null);
 
         addStepLog(0, `分析 ${selectedTables.length} 个数据表...`);
-        await new Promise(r => setTimeout(r, 300));
-
-        setCurrentStep(1);
-        addStepLog(1, '识别表关联关系...');
-
-        setCurrentStep(2);
-        addStepLog(2, '构建本体定义...');
 
         try {
-            const res = await ontologyApi.generate(selectedTables, selectedConnection);
-            const ontology = res.data.ontology;
+            // 1. 启动任务
+            const startRes = await ontologyApi.generate(selectedTables, selectedConnection);
+            const taskId = startRes.data.task_id;
 
-            addStepLog(2, `生成 ${ontology.object_types?.length || 0} 个实体类型`, 'finish');
+            // 2. 轮询状态
+            const pollInterval = setInterval(async () => {
+                try {
+                    const statusRes = await ontologyApi.getTaskStatus(taskId);
+                    const task = statusRes.data;
 
-            let linkCount = ontology.link_types?.length || 0;
-            if (linkCount === 0 && ontology.object_types?.length > 1) {
-                const inferredEdges = inferRelationshipsFromTables(ontology.object_types);
-                if (inferredEdges.length > 0) {
-                    ontology.inferred_links = inferredEdges;
-                    linkCount = inferredEdges.length;
-                    addStepLog(2, `前端推断 ${linkCount} 个潜在关系`, 'finish');
+                    // 更新进度条和日志
+                    if (task.logs && task.logs.length > 0) {
+                        // 只添加新日志
+                        setStepLogs(prev => {
+                            const existingContents = new Set(prev.map(l => l.content + l.time));
+                            const newLogs = task.logs
+                                .filter(l => !existingContents.has(l.content + l.time))
+                                .map(l => ({ ...l, step: currentStep })); // 保持 step 格式
+                            return [...prev, ...newLogs];
+                        });
+                    }
+
+                    if (task.status === 'completed') {
+                        clearInterval(pollInterval);
+
+                        // 处理完成逻辑
+                        const ontology = task.result.ontology;
+
+                        let linkCount = ontology.link_types?.length || 0;
+                        if (linkCount === 0 && ontology.object_types?.length > 1) {
+                            const inferredEdges = inferRelationshipsFromTables(ontology.object_types);
+                            if (inferredEdges.length > 0) {
+                                ontology.inferred_links = inferredEdges;
+                                linkCount = inferredEdges.length;
+                                addStepLog(2, `前端推断 ${linkCount} 个潜在关系`, 'finish');
+                            }
+                        }
+
+                        setCurrentStep(3);
+                        addStepLog(3, '渲染 Schema 图谱...', 'process');
+
+                        setResult(task.result);
+
+                        const initialConfig = {};
+                        (ontology.object_types || []).forEach((obj, idx) => {
+                            initialConfig[obj.name] = { color: DEFAULT_COLORS[idx % DEFAULT_COLORS.length] };
+                        });
+                        setVisualConfig(initialConfig);
+
+                        setTimeout(() => {
+                            addStepLog(3, 'Schema 图谱渲染完成', 'finish');
+                            setCurrentStep(4);
+                        }, 300);
+
+                        message.success('本体 Schema 生成成功！');
+                        setGenerating(false);
+                    } else if (task.status === 'error') {
+                        clearInterval(pollInterval);
+                        addStepLog(currentStep, task.message || '生成失败', 'error');
+                        message.error(task.message || '生成失败');
+                        setGenerating(false);
+                    }
+                } catch (err) {
+                    console.error("Poll error", err);
                 }
-            } else {
-                addStepLog(2, `识别 ${linkCount} 个关系类型`, 'finish');
-            }
+            }, 1000);
 
-            setCurrentStep(3);
-            addStepLog(3, '渲染 Schema 图谱...', 'process');
-
-            setResult(res.data);
-
-            const initialConfig = {};
-            (ontology.object_types || []).forEach((obj, idx) => {
-                initialConfig[obj.name] = { color: DEFAULT_COLORS[idx % DEFAULT_COLORS.length] };
-            });
-            setVisualConfig(initialConfig);
-
-            setTimeout(() => {
-                addStepLog(3, 'Schema 图谱渲染完成', 'finish');
-                setCurrentStep(4);
-            }, 300);
-
-            message.success('本体 Schema 生成成功！');
         } catch (err) {
             addStepLog(currentStep, `错误: ${err.response?.data?.detail || err.message}`, 'error');
-            message.error(err.response?.data?.detail || '生成失败');
-        } finally {
+            message.error(err.response?.data?.detail || '启动生成失败');
             setGenerating(false);
         }
     };
@@ -996,6 +1022,12 @@ const OntologyPage = () => {
                             <Card
                                 title={
                                     <Space>
+                                        <Button
+                                            type="text"
+                                            size="small"
+                                            icon={graphPanelCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                                            onClick={() => setGraphPanelCollapsed(!graphPanelCollapsed)}
+                                        />
                                         {viewMode === 'schema' ? <Layers size={16} /> : <GitBranch size={16} />}
                                         <span>{viewMode === 'schema' ? 'Schema 视图' : '知识图谱'}</span>
                                         <Tag color={viewMode === 'schema' ? 'blue' : 'green'}>
@@ -1027,7 +1059,7 @@ const OntologyPage = () => {
                                         <Text type="secondary" style={{ fontSize: 12 }}>右键改色 / 双击编辑</Text>
                                     </Space>
                                 }
-                                styles={{ body: { padding: 0, position: 'relative' } }}
+                                styles={{ body: { padding: 0, position: 'relative', display: graphPanelCollapsed ? 'none' : 'block' } }}
                             >
                                 <div ref={graphContainerRef} style={{ width: '100%', height: 500, background: '#fafafa' }} />
                                 {renderNodeDetail()}
@@ -1041,7 +1073,7 @@ const OntologyPage = () => {
                                             key: 'report',
                                             label: <span><FileText size={14} /> 分析报告</span>,
                                             children: (
-                                                <div className="markdown-body" style={{ maxHeight: 250, overflowY: 'auto' }}>
+                                                <div className="markdown-body" style={{ maxHeight: 800, overflowY: 'auto' }}>
                                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.report}</ReactMarkdown>
                                                 </div>
                                             )
@@ -1051,7 +1083,7 @@ const OntologyPage = () => {
                                             label: <span><Code size={14} /> JSON 定义</span>,
                                             children: (
                                                 <pre style={{
-                                                    maxHeight: 250,
+                                                    maxHeight: 800,
                                                     overflow: 'auto',
                                                     background: '#f5f5f5',
                                                     padding: 12,

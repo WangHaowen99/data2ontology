@@ -31,6 +31,7 @@ export const dbApi = {
 
 export const ontologyApi = {
     generate: (tableNames, connectionId) => api.post('/ontology/generate', { table_names: tableNames, connection_id: connectionId }),
+    getTaskStatus: (taskId) => api.get(`/ontology/task/${taskId}`),
     getOntologies: () => api.get('/ontology/list'),
 };
 
