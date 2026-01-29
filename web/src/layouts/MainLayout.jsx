@@ -124,7 +124,7 @@ const MainLayout = () => {
                         fontSize: '0.75rem',
                         color: 'var(--color-text-secondary)'
                     }}>
-                        v1.0.0
+                        v1.1.6
                     </div>
                 </div>
             </Sider>

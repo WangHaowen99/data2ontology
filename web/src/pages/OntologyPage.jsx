@@ -69,6 +69,14 @@ const OntologyPage = () => {
     const [edgeForm, setEdgeForm] = useState({ source: '', target: '', name: '' });
     const edgesDataRef = useRef([]); // 保存边数据
 
+    // 日志自动滚动
+    const logsEndRef = useRef(null);
+    useEffect(() => {
+        if (logsEndRef.current) {
+            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [stepLogs]);
+
     // 从 localStorage 恢复
     useEffect(() => {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -970,16 +978,19 @@ const OntologyPage = () => {
                         {stepLogs.length === 0 ? (
                             <Empty description="等待开始" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                         ) : (
-                            <Timeline
-                                items={stepLogs.map((log, idx) => ({
-                                    color: log.status === 'finish' ? 'green' : log.status === 'error' ? 'red' : 'blue',
-                                    children: (
-                                        <div key={idx} style={{ fontSize: 12 }}>
-                                            <Text type="secondary">{log.time}</Text> {log.content}
-                                        </div>
-                                    )
-                                }))}
-                            />
+                            <div>
+                                <Timeline
+                                    items={stepLogs.map((log, idx) => ({
+                                        color: log.status === 'finish' ? 'green' : log.status === 'error' ? 'red' : 'blue',
+                                        children: (
+                                            <div key={idx} style={{ fontSize: 12 }}>
+                                                <Text type="secondary">{log.time}</Text> {log.content}
+                                            </div>
+                                        )
+                                    }))}
+                                />
+                                <div ref={logsEndRef} />
+                            </div>
                         )}
                     </Card>
                 </Col>

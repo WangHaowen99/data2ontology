@@ -383,7 +383,7 @@ def update_task(task_id: str, status: Optional[str] = None, message: Optional[st
         }
         task["logs"].append(log_entry)
 
-async def process_ontology_generation(task_id: str, req: OntologyGenerateRequest):
+def process_ontology_generation(task_id: str, req: OntologyGenerateRequest):
     """Background task for ontology generation."""
     try:
         update_task(task_id, "running", "开始获取元数据...", 0.05, "开始从数据库获取元数据...")
